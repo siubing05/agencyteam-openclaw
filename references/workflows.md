@@ -17,6 +17,8 @@ Example:
 
 ## L2 — 小隊協作
 
+Implementation note: the bundled `agencyteam` scripts currently invoke registered experts with `openclaw agent --agent ...`; they do not provide a built-in `sessions_spawn(...)` wrapper. If you want live in-session parallel orchestration, do it explicitly at the caller level.
+
 **When to use:** 需要 2–4 個專家視角，而且可以並行。
 
 **Pattern:**
@@ -43,23 +45,14 @@ Bullet plan + recommended stack + top risks.
 A solo founder can start implementation today.
 ```
 
-Example spawn pattern:
+Example bundled-script pattern:
 
-```python
-sessions_spawn(
-  agentId="engineering-rapid-prototyper",
-  task=brief,
-  timeoutSeconds=600,
-  runTimeoutSeconds=600,
-)
-
-sessions_spawn(
-  agentId="engineering-frontend-developer",
-  task=brief,
-  timeoutSeconds=600,
-  runTimeoutSeconds=600,
-)
+```bash
+./scripts/spawn-and-install.sh engineering-rapid-prototyper "$BRIEF" --timeout 600
+./scripts/spawn-and-install.sh engineering-frontend-developer "$BRIEF" --timeout 600
 ```
+
+If you need true parallel execution from a live OpenClaw session, launch that explicitly with the appropriate OpenClaw session tooling and then merge the results yourself.
 
 ## L3 — 專案攻堅
 

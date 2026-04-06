@@ -56,10 +56,10 @@ Use a scoped brief like:
 
 Use these scripts when the user wants to set up or maintain the expert roster:
 
-- `scripts/install.sh` — fetch upstream prompts, convert them, sync `agents.list`, merge installed IDs into `main.subagents.allowAgents`, and restart the gateway
-- `scripts/update.sh --dry-run` — preview upstream additions / changes / removals
-- `scripts/update.sh [--prune-removed]` — refresh generated workspaces and synced config
-- `scripts/spawn-and-install.sh <agent-id> <task>` — ensure a single agent exists locally, register it, then invoke it
+- `scripts/install.sh` — fetch upstream prompts into a staged snapshot, sync managed workspaces into the live destination, sync `agents.list`, merge installed IDs into `main.subagents.allowAgents`, and restart the gateway
+- `scripts/update.sh --dry-run` — preview upstream additions / changes / managed removals
+- `scripts/update.sh [--prune-removed]` — refresh generated workspaces from a staged snapshot and prune only agencyteam-managed directories missing upstream
+- `scripts/spawn-and-install.sh <agent-id> <task>` — ensure a single agent is installed + registered + healthy, repair it from a staged snapshot if needed, then invoke it
 - `UPSTREAM_REF` — default pinned upstream commit used for reproducible conversion unless overridden by env or `--ref`
 
 ### Important behavior
@@ -68,7 +68,9 @@ Use these scripts when the user wants to set up or maintain the expert roster:
 - upstream conversion is pinned by default via `UPSTREAM_REF`; use `AGENCYTEAM_UPSTREAM_REF` or `convert.sh --ref` only when you intentionally want a different revision
 - installer/config sync uses `agents.list`; it does **not** write arbitrary keys under `agents`
 - installer preserves non-agency agents already present in config
+- prune/remove flows only touch workspaces marked with `AGENCYTEAM_MANAGED`; unrelated local directories under the same root are left alone
 - installer merges specific IDs into `main.subagents.allowAgents`; it does **not** automatically set `allowAgents: ["*"]`, but it preserves an existing wildcard if your config already uses one
+- config sync now validates `main.subagents.allowAgents` entries instead of silently dropping malformed non-string items
 - `update.sh` refreshes generated `AGENTS.md` files from upstream; if the user customized those generated files locally, updates can overwrite them
 
 ## Missing expert workflow

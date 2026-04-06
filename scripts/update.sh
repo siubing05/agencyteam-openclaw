@@ -12,6 +12,7 @@ DRY_RUN=false
 PRUNE_REMOVED=false
 TMP_DIR=""
 STAGE_DIR=""
+WORKSPACE_SYNC_SUMMARY=""
 
 usage() {
   cat <<'EOF'
@@ -65,6 +66,7 @@ AGENCY_DEST="$(expand_path "$AGENCY_DEST")"
 CONFIG_PATH="$(expand_path "$CONFIG_PATH")"
 TMP_DIR="$(mktemp -d)"
 STAGE_DIR="$TMP_DIR/generated"
+WORKSPACE_SYNC_SUMMARY="$TMP_DIR/workspace-sync.json"
 mkdir -p "$STAGE_DIR"
 
 header "=== agencyteam update ==="
@@ -78,12 +80,13 @@ AGENCY_DEST="$STAGE_DIR" "$SCRIPT_DIR/convert.sh"
 header "Step 2: Compare staged snapshot vs current workspace"
 COMPARE_OUT="$TMP_DIR/compare.json"
 python3 - "$AGENCY_DEST" "$STAGE_DIR" "$PRUNE_REMOVED" "$COMPARE_OUT" <<'PYEOF'
-import json, os, sys
+import json, sys
 from pathlib import Path
 
+MARKER = 'AGENCYTEAM_MANAGED'
 current = Path(sys.argv[1])
 stage = Path(sys.argv[2])
-prune_removed = sys.argv[3].lower() == "true"
+prune_removed = sys.argv[3].lower() == 'true'
 out_path = Path(sys.argv[4])
 
 
@@ -94,54 +97,67 @@ def load_map(root: Path):
     for child in root.iterdir():
         if not child.is_dir():
             continue
-        agents_md = child / "AGENTS.md"
-        text = agents_md.read_text(encoding="utf-8") if agents_md.exists() else ""
-        mapping[child.name] = text
+        agents_md = child / 'AGENTS.md'
+        text = agents_md.read_text(encoding='utf-8') if agents_md.exists() else ''
+        mapping[child.name] = {
+            'text': text,
+            'managed': (child / MARKER).is_file(),
+        }
     return mapping
 
 current_map = load_map(current)
 stage_map = load_map(stage)
 current_ids = set(current_map)
 stage_ids = set(stage_map)
+managed_current_ids = {agent_id for agent_id, meta in current_map.items() if meta['managed']}
 new_ids = sorted(stage_ids - current_ids)
-removed_ids = sorted(current_ids - stage_ids)
-changed_ids = sorted(x for x in stage_ids & current_ids if stage_map[x] != current_map[x])
-unchanged_ids = sorted(x for x in stage_ids & current_ids if stage_map[x] == current_map[x])
+removed_ids = sorted(managed_current_ids - stage_ids)
+changed_ids = sorted(x for x in stage_ids & current_ids if stage_map[x]['text'] != current_map[x]['text'])
+unchanged_ids = sorted(x for x in stage_ids & current_ids if stage_map[x]['text'] == current_map[x]['text'])
+unmanaged_extra_ids = sorted((current_ids - stage_ids) - managed_current_ids)
 
 summary = {
-    "new": new_ids,
-    "changed": changed_ids,
-    "unchanged": unchanged_ids,
-    "removed": removed_ids,
-    "pruneRemoved": prune_removed,
+    'new': new_ids,
+    'changed': changed_ids,
+    'unchanged': unchanged_ids,
+    'removed': removed_ids,
+    'unmanagedExtra': unmanaged_extra_ids,
+    'pruneRemoved': prune_removed,
 }
-out_path.write_text(json.dumps(summary, indent=2), encoding="utf-8")
+out_path.write_text(json.dumps(summary, indent=2), encoding='utf-8')
 print(f"New: {len(new_ids)}  Changed: {len(changed_ids)}  Unchanged: {len(unchanged_ids)}  Removed upstream: {len(removed_ids)}")
 if new_ids:
-    print("New IDs: " + ", ".join(new_ids[:20]) + (" ..." if len(new_ids) > 20 else ""))
+    print('New IDs: ' + ', '.join(new_ids[:20]) + (' ...' if len(new_ids) > 20 else ''))
 if changed_ids:
-    print("Changed IDs: " + ", ".join(changed_ids[:20]) + (" ..." if len(changed_ids) > 20 else ""))
+    print('Changed IDs: ' + ', '.join(changed_ids[:20]) + (' ...' if len(changed_ids) > 20 else ''))
 if removed_ids:
-    suffix = " (will be pruned)" if prune_removed else " (left untouched unless --prune-removed)"
-    print("Removed upstream IDs: " + ", ".join(removed_ids[:20]) + (" ..." if len(removed_ids) > 20 else "") + suffix)
+    suffix = ' (will be pruned)' if prune_removed else ' (left untouched unless --prune-removed)'
+    print('Removed managed IDs: ' + ', '.join(removed_ids[:20]) + (' ...' if len(removed_ids) > 20 else '') + suffix)
+if unmanaged_extra_ids:
+    print('Unmanaged dirs left untouched: ' + ', '.join(unmanaged_extra_ids[:20]) + (' ...' if len(unmanaged_extra_ids) > 20 else ''))
 PYEOF
 
 if [[ "$DRY_RUN" == true ]]; then
   header "Step 3: Dry-run config sync"
-  python3 - "$CONFIG_PATH" "$AGENCY_DEST" "$STAGE_DIR" "$PRUNE_REMOVED" <<'PYEOF'
-import json, os, sys
+  python3 - "$CONFIG_PATH" "$AGENCY_DEST" "$STAGE_DIR" "$COMPARE_OUT" "$PRUNE_REMOVED" <<'PYEOF'
+import json, sys
 from pathlib import Path
 
 config_path = Path(sys.argv[1])
 agency_dest = Path(sys.argv[2]).resolve()
 stage_dir = Path(sys.argv[3]).resolve()
-prune_removed = sys.argv[4].lower() == "true"
+compare_out = Path(sys.argv[4])
+prune_removed = sys.argv[5].lower() == 'true'
 
-with config_path.open("r", encoding="utf-8") as f:
+with config_path.open('r', encoding='utf-8') as f:
     config = json.load(f)
-agent_list = config.get("agents", {}).get("list", [])
-existing_by_id = {entry.get("id"): entry for entry in agent_list if isinstance(entry, dict) and entry.get("id")}
+with compare_out.open('r', encoding='utf-8') as f:
+    compare = json.load(f)
+
+agent_list = config.get('agents', {}).get('list', [])
+existing_by_id = {entry.get('id'): entry for entry in agent_list if isinstance(entry, dict) and entry.get('id')}
 stage_ids = sorted(child.name for child in stage_dir.iterdir() if child.is_dir())
+pruned_ids = set(compare.get('removed', [])) if prune_removed else set()
 
 would_add = 0
 would_update = 0
@@ -150,25 +166,10 @@ for agent_id in stage_ids:
     entry = existing_by_id.get(agent_id)
     if entry is None:
         would_add += 1
-    elif entry.get("workspace") != target_ws or entry.get("model") is None:
+    elif entry.get('workspace') != target_ws or entry.get('model') is None:
         would_update += 1
 
-would_remove = 0
-if prune_removed:
-    prefix = str(agency_dest)
-    stage_set = set(stage_ids)
-    for entry in agent_list:
-        if not isinstance(entry, dict):
-            continue
-        if entry.get("id") == "main":
-            continue
-        workspace = entry.get("workspace")
-        if not isinstance(workspace, str):
-            continue
-        resolved = str(Path(os.path.expanduser(workspace)).resolve())
-        managed = resolved == prefix or resolved.startswith(prefix + os.sep)
-        if managed and entry.get("id") not in stage_set:
-            would_remove += 1
+would_remove = sum(1 for agent_id in pruned_ids if agent_id in existing_by_id)
 
 print(f"Would add: {would_add}  Would update: {would_update}  Would remove: {would_remove}")
 PYEOF
@@ -177,35 +178,37 @@ PYEOF
 fi
 
 header "Step 3: Apply workspace updates"
-python3 - "$AGENCY_DEST" "$STAGE_DIR" "$PRUNE_REMOVED" <<'PYEOF'
-import os, shutil, sys
-from pathlib import Path
-
-current = Path(sys.argv[1])
-stage = Path(sys.argv[2])
-prune_removed = sys.argv[3].lower() == "true"
-current.mkdir(parents=True, exist_ok=True)
-
-stage_ids = {child.name for child in stage.iterdir() if child.is_dir()}
-current_ids = {child.name for child in current.iterdir() if child.is_dir()}
-
-for agent_id in sorted(stage_ids):
-    src = stage / agent_id
-    dst = current / agent_id
-    dst.mkdir(parents=True, exist_ok=True)
-    shutil.copy2(src / "AGENTS.md", dst / "AGENTS.md")
-
-if prune_removed:
-    for agent_id in sorted(current_ids - stage_ids):
-        shutil.rmtree(current / agent_id)
-PYEOF
+SYNC_ARGS=(--current "$AGENCY_DEST" --stage "$STAGE_DIR" --summary-json "$WORKSPACE_SYNC_SUMMARY")
+if [[ "$PRUNE_REMOVED" == true ]]; then
+  SYNC_ARGS+=(--prune-managed-missing)
+fi
+python3 "$SCRIPT_DIR/sync_stage_to_workspace.py" "${SYNC_ARGS[@]}"
 info "Workspace files refreshed"
 
 header "Step 4: Sync agents.list"
 SYNC_ARGS=(--agency-dest "$AGENCY_DEST" --config "$CONFIG_PATH" --backup)
-if [[ "$PRUNE_REMOVED" == true ]]; then
-  SYNC_ARGS+=(--prune-missing)
-fi
+mapfile -t STAGED_IDS < <(python3 - "$WORKSPACE_SYNC_SUMMARY" <<'PYEOF'
+import json, sys
+with open(sys.argv[1], 'r', encoding='utf-8') as f:
+    data = json.load(f)
+for item in data.get('selected', []):
+    print(item)
+PYEOF
+)
+mapfile -t PRUNED_IDS < <(python3 - "$WORKSPACE_SYNC_SUMMARY" <<'PYEOF'
+import json, sys
+with open(sys.argv[1], 'r', encoding='utf-8') as f:
+    data = json.load(f)
+for item in data.get('pruned', []):
+    print(item)
+PYEOF
+)
+for agent_id in "${STAGED_IDS[@]}"; do
+  SYNC_ARGS+=(--agent "$agent_id")
+done
+for agent_id in "${PRUNED_IDS[@]}"; do
+  SYNC_ARGS+=(--remove-agent "$agent_id")
+done
 python3 "$SCRIPT_DIR/sync_openclaw_config.py" "${SYNC_ARGS[@]}"
 
 header "Step 5: Restart gateway"

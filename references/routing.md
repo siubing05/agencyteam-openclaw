@@ -2,6 +2,8 @@
 
 Use this as a practical shortlist, not a hard rulebook. Pick the smallest team that covers the task.
 
+These expert IDs are meant to map to registered OpenClaw agent IDs under `agents.list`. In the bundled workflow, invoke them via `openclaw agent --agent <id>` (or `scripts/spawn-and-install.sh` when the local install may be missing or unhealthy).
+
 ## L1 Single-Expert Routing
 
 | Task Type | Primary Expert | Backup Expert | Level |

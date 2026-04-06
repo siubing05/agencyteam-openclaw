@@ -41,10 +41,10 @@ flowchart LR
   S --> R
 ```
 
-- `convert.sh` transforms upstream expert prompts into local OpenClaw workspaces
-- `install.sh` registers selected experts and updates `main.subagents.allowAgents`
-- `update.sh` refreshes generated experts while preserving non-agency agents in your config
-- `spawn-and-install.sh` installs a missing expert and immediately launches the workflow
+- `convert.sh` transforms upstream expert prompts into a staged snapshot of local OpenClaw workspaces
+- `install.sh` syncs that staged snapshot into the live workspace root, then registers selected experts and updates `main.subagents.allowAgents`
+- `update.sh` refreshes generated experts from a staged snapshot while preserving non-agency agents in your config
+- `spawn-and-install.sh` repairs a missing or unhealthy expert from a staged snapshot before launching the workflow
 
 ## Common use cases
 
@@ -131,6 +131,8 @@ Also remove agencyteam-managed agents that disappeared upstream:
 - if you manually edited generated files under `~/.openclaw/agency-agents/`, an update can overwrite those edits
 - non-agency agents in your config are preserved
 - `--prune-removed` is opt-in so removals are explicit
+- prune flows only remove directories marked with `AGENCYTEAM_MANAGED`; unrelated local directories under the same root are left alone
+- config sync fail-fast validates malformed `main.subagents.allowAgents` values instead of silently dropping bad entries
 
 ## On-demand installation + spawn
 

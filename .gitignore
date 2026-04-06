@@ -18,6 +18,10 @@ Thumbs.db
 agency-agents/
 agency-agents-src/
 
+# Python
+__pycache__/
+*.py[cod]
+
 # Temporary
 *.tmp
 *.temp

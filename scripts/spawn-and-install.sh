@@ -9,6 +9,8 @@ source "$SCRIPT_DIR/common.sh"
 AGENCY_DEST="${AGENCY_DEST:-${HOME}/.openclaw/agency-agents}"
 CONFIG_PATH="$(openclaw_config_path)"
 TIMEOUT=300
+TMP_DIR=""
+STAGE_DIR=""
 
 usage() {
   cat <<'EOF'
@@ -58,38 +60,55 @@ if [[ ! "$TIMEOUT" =~ ^[0-9]+$ ]]; then
   exit 1
 fi
 
+cleanup() {
+  if [[ -n "$TMP_DIR" && -d "$TMP_DIR" ]]; then
+    rm -rf "$TMP_DIR"
+  fi
+}
+trap cleanup EXIT
+
 require_cmd openclaw python3 git
 ensure_openclaw_config_exists
 mkdir -p "$AGENCY_DEST"
 AGENCY_DEST="$(expand_path "$AGENCY_DEST")"
 CONFIG_PATH="$(expand_path "$CONFIG_PATH")"
+TMP_DIR="$(mktemp -d)"
+STAGE_DIR="$TMP_DIR/generated"
+mkdir -p "$STAGE_DIR"
 
-is_registered() {
-  python3 - "$CONFIG_PATH" "$AGENT_ID" <<'PYEOF'
-import json, sys
+is_healthy_install() {
+  python3 - "$CONFIG_PATH" "$AGENCY_DEST" "$AGENT_ID" <<'PYEOF'
+import json, os, sys
 from pathlib import Path
 config_path = Path(sys.argv[1])
-agent_id = sys.argv[2]
-with config_path.open("r", encoding="utf-8") as f:
+agency_dest = Path(sys.argv[2]).resolve()
+agent_id = sys.argv[3]
+expected = str((agency_dest / agent_id).resolve())
+agent_md = agency_dest / agent_id / 'AGENTS.md'
+if not agent_md.is_file():
+    raise SystemExit(1)
+with config_path.open('r', encoding='utf-8') as f:
     config = json.load(f)
-agent_list = config.get("agents", {}).get("list", [])
-ids = {entry.get("id") for entry in agent_list if isinstance(entry, dict)}
-raise SystemExit(0 if agent_id in ids else 1)
+agent_list = config.get('agents', {}).get('list', [])
+entry = next((item for item in agent_list if isinstance(item, dict) and item.get('id') == agent_id), None)
+if entry is None:
+    raise SystemExit(1)
+workspace = entry.get('workspace')
+if not isinstance(workspace, str):
+    raise SystemExit(1)
+resolved = str(Path(os.path.expanduser(workspace)).resolve())
+raise SystemExit(0 if resolved == expected else 1)
 PYEOF
 }
 
-header "=== agencyteam spawn-and-install ==="
-info "Agent: $AGENT_ID"
-info "Config: $CONFIG_PATH"
+sync_target_agent() {
+  header "Agent missing or unhealthy — fetching staged upstream snapshot"
+  AGENCY_DEST="$STAGE_DIR" "$SCRIPT_DIR/convert.sh"
 
-if ! is_registered || [[ ! -d "$AGENCY_DEST/$AGENT_ID" ]]; then
-  header "Agent missing locally — fetching upstream snapshot"
-  AGENCY_DEST="$AGENCY_DEST" "$SCRIPT_DIR/convert.sh"
-
-  if [[ ! -d "$AGENCY_DEST/$AGENT_ID" ]]; then
-    error "Agent not found upstream after conversion: $AGENT_ID"
-    exit 1
-  fi
+  python3 "$SCRIPT_DIR/sync_stage_to_workspace.py" \
+    --current "$AGENCY_DEST" \
+    --stage "$STAGE_DIR" \
+    --agent "$AGENT_ID"
 
   header "Sync config"
   python3 "$SCRIPT_DIR/sync_openclaw_config.py" \
@@ -100,8 +119,16 @@ if ! is_registered || [[ ! -d "$AGENCY_DEST/$AGENT_ID" ]]; then
 
   header "Restart gateway"
   restart_gateway_and_wait || true
+}
+
+header "=== agencyteam spawn-and-install ==="
+info "Agent: $AGENT_ID"
+info "Config: $CONFIG_PATH"
+
+if is_healthy_install; then
+  info "Agent already installed, registered, and healthy"
 else
-  info "Agent already installed and registered"
+  sync_target_agent
 fi
 
 header "Invoke agent"

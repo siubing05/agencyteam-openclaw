@@ -155,6 +155,14 @@ for category in "${CATEGORIES[@]}"; do
     dest="$AGENCY_DEST/$agent_id"
     mkdir -p "$dest"
     cp "$md_file" "$dest/AGENTS.md"
+    cat > "$dest/AGENCYTEAM_MANAGED" <<EOF
+agencyteam
+agent_id=$agent_id
+upstream_url=$REPO_URL
+requested_ref=$UPSTREAM_REF
+resolved_rev=$resolved_rev
+source_file=${md_file#$SOURCE_DIR/}
+EOF
     ((count+=1))
   done
 done

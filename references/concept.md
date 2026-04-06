@@ -5,7 +5,7 @@
 | Concept | agencyteam mapping |
 |--------|---------------------|
 | Leader / coordinator | `main` agent |
-| Worker experts | `sessions_spawn(agentId=<expert>)` |
+| Worker experts | Registered OpenClaw agents in `agents.list`; bundled scripts invoke them with `openclaw agent --agent <expert>`, while in-agent orchestration may use equivalent OpenClaw session tooling |
 | Isolated specialist identity | Each expert workspace under `~/.openclaw/agency-agents/<agent-id>/` |
 | Task brief | Goal + scope + output + done criteria |
 | Synthesis loop | `main` merges expert outputs before replying |
@@ -18,11 +18,13 @@
 - a custom board / inbox protocol
 - special runtime patches in OpenClaw
 
-It is just a routing + install + spawn workflow on top of standard OpenClaw agent configuration.
+It is a routing + install + invoke workflow on top of standard OpenClaw agent configuration.
 
 ## Coordination Rules
 
 ### Leader → Expert
+
+Implementation note: the reference scripts in this skill install/repair experts locally and invoke them through `openclaw agent --agent <id> --message <task>`. If you orchestrate experts from inside an OpenClaw session instead of the bundled scripts, use the equivalent session/subagent tooling deliberately rather than assuming the scripts do that for you.
 
 Give each expert enough context to act independently:
 
